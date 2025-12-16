@@ -37,7 +37,19 @@ async function run() {
         const packColl = db.collection("packages");
         const payColl = db.collection("payments");
 
-        app.get("/users", async (req, res) => {});
+        app.get("/users/:uid", async (req, res) => {
+            const { uid } = req.params;
+
+            try {
+                const user = await usersColl.findOne({ uid });
+                if (!user)
+                    return res.status(404).send({ error: "User not found" });
+                res.status(200).send(user);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ error: "Server error" });
+            }
+        });
 
         app.post("/register", async (req, res) => {
             try {
