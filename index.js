@@ -40,9 +40,21 @@ async function run() {
         app.get("/users", async (req, res) => {});
 
         app.post("/register", async (req, res) => {
-            const user = req.body;
-            const result = await usersColl.insertOne(user);
-            res.send(result);
+            try {
+                const user = {
+                    ...req.body,
+                    createdAt: new Date(),
+                    updatedAt: new Date(),
+                };
+
+                console.log(user);
+
+                const result = await usersColl.insertOne(user);
+                res.status(201).send(result);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Registration failed" });
+            }
         });
 
         app.post("/addasset", async (req, res) => {
