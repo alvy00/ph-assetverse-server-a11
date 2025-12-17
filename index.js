@@ -104,6 +104,66 @@ async function run() {
             }
         });
 
+        app.get("/assets", verifyFirebaseToken, async (req, res) => {
+            try {
+                const assets = await assetsColl.find().toArray();
+                res.status(200).send(assets);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Failed to fetch assets" });
+            }
+        });
+
+        app.post("/reqasset", verifyFirebaseToken, async (req, res) => {
+            try {
+                const {
+                    assetId,
+                    assetName,
+                    assetType,
+                    requesterName,
+                    requesterEmail,
+                    hrEmail,
+                    companyName,
+                } = req.body;
+
+                const alreadyRequested = await reqColl.findOne({
+                    assetId,
+                    requesterEmail,
+                    requestStatus: "pending",
+                });
+
+                if (alreadyRequested) {
+                    return res
+                        .status(409)
+                        .send({ message: "You already requested this asset" });
+                }
+
+                const assetReq = {
+                    assetId,
+                    assetName,
+                    assetType,
+                    requesterName,
+                    requesterEmail,
+                    hrEmail,
+                    companyName,
+                    requestDate: new Date(),
+                    approvalDate: null,
+                    requestStatus: "pending",
+                    note: "",
+                    processedBy: "",
+                };
+
+                await reqColl.insertOne(assetReq);
+
+                res.status(201).send({
+                    message: "Asset requested successfully",
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Server error" });
+            }
+        });
+
         // --------------- HR ---------------------
         app.post("/addasset", verifyFirebaseToken, async (req, res) => {
             const asset = req.body;
@@ -120,31 +180,28 @@ async function run() {
             }
         });
 
-        app.get("/assets", verifyFirebaseToken, async (req, res) => {
-            try {
-                const assets = await assetsColl.find().toArray();
-                res.status(200).send(assets);
-            } catch (error) {
-                console.error(error);
-                res.status(500).send({ message: "Failed to fetch assets" });
+        //fetch assets by comName
+        app.get(
+            "/assets/:companyName",
+            verifyFirebaseToken,
+            async (req, res) => {
+                const { companyName } = req.params;
+                const query = {
+                    companyName: {
+                        $regex: new RegExp(`^${companyName}$`, "i"),
+                    },
+                };
+                try {
+                    const assets = await assetsColl.find(query).toArray();
+                    res.status(200).send(assets);
+                } catch (error) {
+                    console.error(error);
+                    res.status(500).send({ message: "Failed to fetch assets" });
+                }
             }
-        });
+        );
 
-        app.get("/assets/:companyName", async (req, res) => {
-            const { companyName } = req.params;
-            const query = {
-                companyName: { $regex: new RegExp(`^${companyName}$`, "i") },
-            };
-            try {
-                const assets = await assetsColl.find(query).toArray();
-                res.status(200).send(assets);
-            } catch (error) {
-                console.error(error);
-                res.status(500).send({ message: "Failed to fetch assets" });
-            }
-        });
-
-        app.patch("/assets/:id", async (req, res) => {
+        app.patch("/assets/:id", verifyFirebaseToken, async (req, res) => {
             try {
                 const { id } = req.params;
                 const { productName, productType, productImage } = req.body;
@@ -171,6 +228,7 @@ async function run() {
             }
         });
 
+        // delete asset
         app.delete(
             "/assets/delete/:id",
             verifyFirebaseToken,
@@ -204,18 +262,12 @@ async function run() {
             }
         );
 
-        app.post("/payment", async (req, res) => {
+        app.post("/payment", verifyFirebaseToken, async (req, res) => {
             const payment = req.body;
             const result = await payColl.insertOne(payment);
             res.send(result);
         });
-
-        // await client.db("admin").command({ ping: 1 });
-        // console.log(
-        //     "Pinged your deployment. You successfully connected to MongoDB!"
-        // );
     } finally {
-        //await client.close();
     }
 }
 run().catch(console.dir);
