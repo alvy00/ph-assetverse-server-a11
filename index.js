@@ -37,6 +37,7 @@ async function run() {
         const packColl = db.collection("packages");
         const payColl = db.collection("payments");
 
+        // -------------- USER --------------
         app.get("/users/:uid", async (req, res) => {
             const { uid } = req.params;
 
@@ -69,10 +70,30 @@ async function run() {
             }
         });
 
+        // --------------- HR ---------------------
         app.post("/addasset", async (req, res) => {
             const asset = req.body;
-            const result = await assetsColl.insertOne(asset);
-            res.send(result);
+
+            try {
+                const result = await assetsColl.insertOne({
+                    ...asset,
+                    dateAdded: new Date(),
+                });
+                res.status(201).send(result);
+            } catch (err) {
+                console.error(err);
+                res.send({ message: "Registration failed" });
+            }
+        });
+
+        app.get("/assets", async (req, res) => {
+            try {
+                const assets = await assetsColl.find().toArray();
+                res.status(200).send(assets);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Failed to fetch assets" });
+            }
         });
 
         app.post("/payment", async (req, res) => {
@@ -80,6 +101,7 @@ async function run() {
             const result = await payColl.insertOne(payment);
             res.send(result);
         });
+
         // await client.db("admin").command({ ping: 1 });
         // console.log(
         //     "Pinged your deployment. You successfully connected to MongoDB!"
