@@ -171,6 +171,39 @@ async function run() {
             }
         });
 
+        app.delete(
+            "/assets/delete/:id",
+            verifyFirebaseToken,
+            async (req, res) => {
+                const { id } = req.params;
+
+                if (!id) {
+                    return res
+                        .status(400)
+                        .send({ message: "Asset ID is required" });
+                }
+
+                try {
+                    const query = { _id: new ObjectId(id) };
+                    const result = await assetsColl.deleteOne(query);
+
+                    if (result.deletedCount === 0) {
+                        return res
+                            .status(404)
+                            .send({ message: "Asset not found" });
+                    }
+
+                    res.status(200).send({
+                        message: "Asset deleted successfully",
+                        result,
+                    });
+                } catch (error) {
+                    console.error(error);
+                    res.status(500).send({ message: "Internal server error" });
+                }
+            }
+        );
+
         app.post("/payment", async (req, res) => {
             const payment = req.body;
             const result = await payColl.insertOne(payment);
