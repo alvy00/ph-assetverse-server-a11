@@ -528,10 +528,16 @@ async function run() {
         // --------------- COMMON -----------------------
         app.patch("/profileupdate", verifyFirebaseToken, async (req, res) => {
             try {
-                const { email, name, dob } = req.body;
+                const { email, name, dob, companyName } = req.body;
+                const updateData = {};
+
+                if (dob) updateData.dob = dob;
+                if (companyName) updateData.companyName = companyName;
+                if (name) updateData.name = name;
+
                 const result = await usersColl.updateOne(
                     { email },
-                    { $set: { name, dob } }
+                    { $set: updateData }
                 );
 
                 if (result.matchedCount === 0) {
