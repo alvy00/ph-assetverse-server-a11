@@ -323,6 +323,7 @@ async function run() {
             }
         });
 
+        // approve/reject request
         app.patch(
             "/request/updatestatus",
             verifyFirebaseToken,
@@ -382,6 +383,53 @@ async function run() {
                 }
             }
         );
+
+        app.post("/assign", verifyFirebaseToken, verifyHR, async (req, res) => {
+            try {
+                const { assetId, employeeEmail, employeeName, companyName } =
+                    req.body;
+
+                const hrEmail = req.query.email;
+
+                const asset = await assetsColl.findOne({
+                    _id: new ObjectId(assetId),
+                });
+
+                const assetExists = await assignedAssetColl.findOne({
+                    assetId,
+                    employeeEmail,
+                });
+
+                if (assetExists) {
+                    return res
+                        .status(409)
+                        .send({ message: "Asset already assigned" });
+                }
+
+                const assigningAsset = {
+                    assetId,
+                    assetName: asset.productName,
+                    assetImage: asset.productImage,
+                    assetType: asset.productType,
+                    employeeEmail,
+                    employeeName,
+                    hrEmail,
+                    companyName,
+                    assignmentDate: new Date(),
+                    returnDate: null,
+                    status: "assigned",
+                };
+
+                await assignedAssetColl.insertOne(assigningAsset);
+
+                res.status(201).send({
+                    message: "Asset assigned successfully",
+                });
+            } catch (error) {
+                console.error("Assign asset error:", error);
+                res.status(500).send({ message: "Server error" });
+            }
+        });
 
         app.post("/payment", verifyFirebaseToken, async (req, res) => {
             const payment = req.body;
