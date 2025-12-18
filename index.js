@@ -132,12 +132,83 @@ async function run() {
             }
         });
 
+        // technically gets all the reqs as MyAssets
+        app.get("/myassets", verifyFirebaseToken, async (req, res) => {
+            const { email } = req.query;
+
+            try {
+                const assets = await reqColl
+                    .find({ requesterEmail: email })
+                    .toArray();
+                res.status(200).send(assets);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Failed to fetch assets" });
+            }
+        });
+
+        app.get("/affdata", async (req, res) => {
+            try {
+                const { email } = req.query;
+
+                if (!email) {
+                    return res
+                        .status(400)
+                        .send({ message: "Email is required" });
+                }
+
+                const data = await empAffColl
+                    .find({ employeeEmail: email })
+                    .toArray();
+
+                const uniqueComs = [
+                    ...new Set(
+                        data
+                            .filter((data) => data.companyName)
+                            .map((data) => data.companyName)
+                    ),
+                ];
+
+                //affData of the companies the user is affiliated with
+                const comsAffData = await empAffColl
+                    .find({ companyName: { $in: uniqueComs } })
+                    .toArray();
+
+                // find the users by first extracting emails from comsAffData
+                const emails = [
+                    ...new Set(
+                        comsAffData
+                            .map((com) => com.employeeEmail)
+                            .filter(
+                                (empEmail) => empEmail && empEmail !== email
+                            )
+                    ),
+                ];
+                const usersAffData = await usersColl
+                    .find({ email: { $in: emails } })
+                    .toArray();
+
+                res.status(200).send({
+                    data,
+                    uniqueComs,
+                    comsAffData,
+                    usersAffData,
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({
+                    message: "Failed to fetch affiliation data",
+                });
+            }
+        });
+
         app.post("/reqasset", verifyFirebaseToken, async (req, res) => {
             try {
                 const {
                     assetId,
                     assetName,
                     assetType,
+                    assetImage,
                     requesterName,
                     requesterEmail,
                     hrEmail,
@@ -160,6 +231,7 @@ async function run() {
                     assetId,
                     assetName,
                     assetType,
+                    assetImage,
                     requesterName,
                     requesterEmail,
                     hrEmail,
@@ -225,6 +297,7 @@ async function run() {
             }
         );
 
+        // asset update (Edit
         app.patch(
             "/assets/:id",
             verifyFirebaseToken,
@@ -264,7 +337,7 @@ async function run() {
             }
         );
 
-        // delete asset
+        // delete asset (Delete)
         app.delete(
             "/assets/delete/:id",
             verifyFirebaseToken,
@@ -391,9 +464,18 @@ async function run() {
 
                 const hrEmail = req.query.email;
 
-                const asset = await assetsColl.findOne({
-                    _id: new ObjectId(assetId),
-                });
+                const query = { _id: new ObjectId(assetId) };
+                const asset = await assetsColl.findOne(query);
+
+                if (!asset) {
+                    return res.status(404).send({ message: "Asset not found" });
+                }
+
+                if (asset.availableQuantity <= 0) {
+                    return res
+                        .status(400)
+                        .send({ message: "No more assets available" });
+                }
 
                 const assetExists = await assignedAssetColl.findOne({
                     assetId,
@@ -421,6 +503,12 @@ async function run() {
                 };
 
                 await assignedAssetColl.insertOne(assigningAsset);
+
+                await assetsColl.updateOne(query, {
+                    $set: {
+                        availableQuantity: Number(asset.availableQuantity) - 1,
+                    },
+                });
 
                 res.status(201).send({
                     message: "Asset assigned successfully",
