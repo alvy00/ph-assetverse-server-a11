@@ -64,6 +64,24 @@ async function run() {
             }
         };
 
+        const verifyHR = async (req, res, next) => {
+            try {
+                const decoded_email = req.user.email;
+                const hr = await usersColl.findOne({ email: decoded_email });
+
+                if (!hr || hr.role !== "hr") {
+                    return res
+                        .status(403)
+                        .send({ message: "Forbidden access!" });
+                }
+
+                next();
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Server error" });
+            }
+        };
+
         // -------------- USER --------------
         app.get("/refetch", verifyFirebaseToken, async (req, res) => {
             const user = await usersColl.findOne({
@@ -165,25 +183,31 @@ async function run() {
         });
 
         // --------------- HR ---------------------
-        app.post("/addasset", verifyFirebaseToken, async (req, res) => {
-            const asset = req.body;
+        app.post(
+            "/addasset",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                const asset = req.body;
 
-            try {
-                const result = await assetsColl.insertOne({
-                    ...asset,
-                    dateAdded: new Date(),
-                });
-                res.status(201).send(result);
-            } catch (err) {
-                console.error(err);
-                res.send({ message: "Registration failed" });
+                try {
+                    const result = await assetsColl.insertOne({
+                        ...asset,
+                        dateAdded: new Date(),
+                    });
+                    res.status(201).send(result);
+                } catch (err) {
+                    console.error(err);
+                    res.send({ message: "Registration failed" });
+                }
             }
-        });
+        );
 
         //fetch assets by comName
         app.get(
             "/assets/:companyName",
             verifyFirebaseToken,
+            verifyHR,
             async (req, res) => {
                 const { companyName } = req.params;
                 const query = {
@@ -201,37 +225,50 @@ async function run() {
             }
         );
 
-        app.patch("/assets/:id", verifyFirebaseToken, async (req, res) => {
-            try {
-                const { id } = req.params;
-                const { productName, productType, productImage } = req.body;
+        app.patch(
+            "/assets/:id",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                try {
+                    const { id } = req.params;
+                    const { productName, productType, productImage } = req.body;
 
-                const query = { _id: new ObjectId(id) };
-                const updateData = {
-                    $set: {
-                        productName,
-                        productType,
-                        productImage,
-                    },
-                };
+                    const query = { _id: new ObjectId(id) };
+                    const updateData = {
+                        $set: {
+                            productName,
+                            productType,
+                            productImage,
+                        },
+                    };
 
-                const result = await assetsColl.updateOne(query, updateData);
+                    const result = await assetsColl.updateOne(
+                        query,
+                        updateData
+                    );
 
-                if (result.matchedCount === 0) {
-                    return res.status(404).send({ message: "Asset not found" });
+                    if (result.matchedCount === 0) {
+                        return res
+                            .status(404)
+                            .send({ message: "Asset not found" });
+                    }
+
+                    res.status(200).send({
+                        message: "Asset updated successfully",
+                    });
+                } catch (error) {
+                    console.error(error);
+                    res.status(500).send({ message: "Internal server error" });
                 }
-
-                res.status(200).send({ message: "Asset updated successfully" });
-            } catch (error) {
-                console.error(error);
-                res.status(500).send({ message: "Internal server error" });
             }
-        });
+        );
 
         // delete asset
         app.delete(
             "/assets/delete/:id",
             verifyFirebaseToken,
+            verifyHR,
             async (req, res) => {
                 const { id } = req.params;
 
@@ -261,6 +298,54 @@ async function run() {
                 }
             }
         );
+
+        app.get("/requests", verifyFirebaseToken, async (req, res) => {
+            const { email } = req.user;
+            const { companyName } = req.query;
+
+            if (!companyName) {
+                return res
+                    .status(400)
+                    .send({ message: "companyName is required" });
+            }
+
+            try {
+                const query = {
+                    hrEmail: email,
+                    companyName,
+                };
+
+                const requests = await reqColl.find(query).toArray();
+                res.status(200).send(requests);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Server error" });
+            }
+        });
+
+        app.get("/request/a/:reqId", verifyFirebaseToken, async (req, res) => {
+            const { reqId } = req.params;
+
+            try {
+                const query = { _id: new ObjectId(reqId) };
+                const requestDoc = await reqColl.findOne(query);
+
+                if (!requestDoc) {
+                    return res
+                        .status(404)
+                        .send({ message: "Request not found!" });
+                }
+
+                await reqColl.updateOne(query, {
+                    $set: { requestStatus: "approved" },
+                });
+
+                res.status(200).send({ message: "Request approved!" });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Server error" });
+            }
+        });
 
         app.post("/payment", verifyFirebaseToken, async (req, res) => {
             const payment = req.body;
