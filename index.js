@@ -323,29 +323,65 @@ async function run() {
             }
         });
 
-        app.get("/request/a/:reqId", verifyFirebaseToken, async (req, res) => {
-            const { reqId } = req.params;
+        app.patch(
+            "/request/updatestatus",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                const { reqId, requesterEmail, requestStatus } = req.body;
+                const { hrEmail } = req.query;
 
-            try {
-                const query = { _id: new ObjectId(reqId) };
-                const requestDoc = await reqColl.findOne(query);
+                try {
+                    const query = { _id: new ObjectId(reqId) };
+                    const requestDoc = await reqColl.findOne(query);
 
-                if (!requestDoc) {
-                    return res
-                        .status(404)
-                        .send({ message: "Request not found!" });
+                    if (!requestDoc) {
+                        return res
+                            .status(404)
+                            .send({ message: "Request not found!" });
+                    }
+
+                    if (requestStatus === "approved") {
+                        await reqColl.updateOne(query, {
+                            $set: {
+                                approvalDate: new Date(),
+                                requestStatus: requestStatus,
+                                processedBy: hrEmail,
+                            },
+                        });
+
+                        const em = await usersColl.findOne({
+                            email: requesterEmail,
+                        });
+                        const hr = await usersColl.findOne({ email: hrEmail });
+
+                        const empAffObj = {
+                            employeeEmail: em.email,
+                            employeeName: em.name,
+                            hrEmail: hrEmail,
+                            companyName: hr.companyName,
+                            companyLogo: hr.companyLogo,
+                            affiliationDate: new Date(),
+                            status: "active",
+                        };
+
+                        await empAffColl.insertOne(empAffObj);
+                        res.status(200).send({ message: "Request approved!" });
+                    } else {
+                        await reqColl.updateOne(query, {
+                            $set: {
+                                requestStatus: requestStatus,
+                                processedBy: hrEmail,
+                            },
+                        });
+                        res.status(200).send({ message: "Request rejected!" });
+                    }
+                } catch (error) {
+                    console.error(error);
+                    res.status(500).send({ message: "Server error" });
                 }
-
-                await reqColl.updateOne(query, {
-                    $set: { requestStatus: "approved" },
-                });
-
-                res.status(200).send({ message: "Request approved!" });
-            } catch (error) {
-                console.error(error);
-                res.status(500).send({ message: "Server error" });
             }
-        });
+        );
 
         app.post("/payment", verifyFirebaseToken, async (req, res) => {
             const payment = req.body;
