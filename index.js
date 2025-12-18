@@ -524,6 +524,28 @@ async function run() {
             const result = await payColl.insertOne(payment);
             res.send(result);
         });
+
+        // --------------- COMMON -----------------------
+        app.patch("/profileupdate", verifyFirebaseToken, async (req, res) => {
+            try {
+                const { email, name, dob } = req.body;
+                const result = await usersColl.updateOne(
+                    { email },
+                    { $set: { name, dob } }
+                );
+
+                if (result.matchedCount === 0) {
+                    return res.status(404).send({ message: "User not found" });
+                }
+
+                res.status(200).send({
+                    message: "Profile updated successfully",
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Failed to update profile" });
+            }
+        });
     } finally {
     }
 }
