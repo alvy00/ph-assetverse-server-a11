@@ -457,6 +457,107 @@ async function run() {
             }
         );
 
+        // get all employees also AGGREGATE used for first time
+        app.get("/emlist", verifyFirebaseToken, verifyHR, async (req, res) => {
+            try {
+                const { email, companyName } = req.query;
+
+                const employees = await reqColl
+                    .aggregate([
+                        { $match: { companyName, requestStatus: "approved" } },
+
+                        {
+                            $group: {
+                                _id: "$requesterEmail",
+                                joinDate: { $min: "$approvalDate" },
+                            },
+                        },
+
+                        {
+                            $lookup: {
+                                from: "users",
+                                localField: "_id",
+                                foreignField: "email",
+                                as: "employee",
+                            },
+                        },
+                        {
+                            $lookup: {
+                                from: "assignedAssets",
+                                localField: "_id",
+                                foreignField: "employeeEmail",
+                                as: "assignedAssets",
+                            },
+                        },
+                        {
+                            $unwind: {
+                                path: "$employee",
+                                preserveNullAndEmptyArrays: true,
+                            },
+                        },
+                        {
+                            $project: {
+                                _id: 0,
+                                joinDate: 1,
+                                assetsCount: { $size: "$assignedAssets" },
+                                name: "$employee.name",
+                                email: "$employee.email",
+                                role: "$employee.role",
+                                profileImg: "$employee.profileImg",
+                            },
+                        },
+                    ])
+                    .toArray();
+
+                res.status(200).send(employees);
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Failed to fetch employees" });
+            }
+        });
+
+        app.delete(
+            "/emdelete",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                try {
+                    const { employeeEmail, companyName } = req.query;
+
+                    await assignedAssetColl.deleteMany({
+                        employeeEmail,
+                        companyName,
+                    });
+
+                    const affResult = await empAffColl.deleteOne({
+                        employeeEmail,
+                        companyName,
+                    });
+
+                    if (affResult.deletedCount === 0) {
+                        return res
+                            .status(404)
+                            .send({ message: "Employee not found in company" });
+                    }
+
+                    await reqColl.updateOne(
+                        { requesterEmail: employeeEmail, companyName },
+                        { $set: { requestStatus: "pending" } }
+                    );
+
+                    res.status(200).send({
+                        message: "Employee removed from company successfully",
+                    });
+                } catch (error) {
+                    console.error(error);
+                    res.status(500).send({
+                        message: "Failed to remove employee",
+                    });
+                }
+            }
+        );
+
+        // assign assets
         app.post("/assign", verifyFirebaseToken, verifyHR, async (req, res) => {
             try {
                 const { assetId, employeeEmail, employeeName, companyName } =
