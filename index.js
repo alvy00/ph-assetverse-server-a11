@@ -516,6 +516,7 @@ async function run() {
             }
         });
 
+        // delete employee
         app.delete(
             "/emdelete",
             verifyFirebaseToken,
@@ -523,6 +524,20 @@ async function run() {
             async (req, res) => {
                 try {
                     const { employeeEmail, companyName } = req.query;
+
+                    const assignedAssets = await assignedAssetColl
+                        .find({ employeeEmail, companyName })
+                        .toArray();
+                    if (assignedAssets.length > 0) {
+                        const bulk = assignedAssets.map((asset) => ({
+                            updateOne: {
+                                filter: { _id: new ObjectId(asset.assetId) },
+                                update: { $inc: { availableQuantity: 1 } },
+                            },
+                        }));
+
+                        await assetsColl.bulkWrite(bulk);
+                    }
 
                     await assignedAssetColl.deleteMany({
                         employeeEmail,
@@ -557,36 +572,45 @@ async function run() {
             }
         );
 
-        // assign assets
+        // assigning assets
         app.post("/assign", verifyFirebaseToken, verifyHR, async (req, res) => {
             try {
                 const { assetId, employeeEmail, employeeName, companyName } =
                     req.body;
-
                 const hrEmail = req.query.email;
 
-                const query = { _id: new ObjectId(assetId) };
-                const asset = await assetsColl.findOne(query);
-
-                if (!asset) {
+                const asset = await assetsColl.findOne({
+                    _id: new ObjectId(assetId),
+                });
+                if (!asset)
                     return res.status(404).send({ message: "Asset not found" });
-                }
-
-                if (asset.availableQuantity <= 0) {
+                if (asset.availableQuantity <= 0)
                     return res
                         .status(400)
                         .send({ message: "No more assets available" });
-                }
 
                 const assetExists = await assignedAssetColl.findOne({
                     assetId,
                     employeeEmail,
                 });
-
-                if (assetExists) {
+                if (assetExists)
                     return res
                         .status(409)
                         .send({ message: "Asset already assigned" });
+
+                const hrUpdate = await usersColl.updateOne(
+                    {
+                        email: hrEmail,
+                        $expr: { $lt: ["$currentEmployees", "$packageLimit"] },
+                    },
+                    { $inc: { currentEmployees: 1 } }
+                );
+
+                if (hrUpdate.matchedCount === 0) {
+                    return res.status(409).send({
+                        message:
+                            "Employee limit reached. Please upgrade your package",
+                    });
                 }
 
                 const assigningAsset = {
@@ -602,14 +626,12 @@ async function run() {
                     returnDate: null,
                     status: "assigned",
                 };
-
                 await assignedAssetColl.insertOne(assigningAsset);
 
-                await assetsColl.updateOne(query, {
-                    $set: {
-                        availableQuantity: Number(asset.availableQuantity) - 1,
-                    },
-                });
+                await assetsColl.updateOne(
+                    { _id: new ObjectId(assetId) },
+                    { $inc: { availableQuantity: -1 } }
+                );
 
                 res.status(201).send({
                     message: "Asset assigned successfully",
