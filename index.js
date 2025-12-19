@@ -134,13 +134,20 @@ async function run() {
 
         // technically gets all the reqs as MyAssets
         app.get("/myassets", verifyFirebaseToken, async (req, res) => {
-            const { email } = req.query;
+            const { email, page, limit } = req.query;
 
             try {
                 const assets = await reqColl
                     .find({ requesterEmail: email })
+                    .skip(10 * Number(page))
+                    .limit(Number(limit))
                     .toArray();
-                res.status(200).send(assets);
+
+                const assetCount = await reqColl.countDocuments({
+                    requesterEmail: email,
+                });
+
+                res.status(200).send({ assets, assetCount });
             } catch (error) {
                 console.error(error);
                 res.status(500).send({ message: "Failed to fetch assets" });
@@ -282,14 +289,21 @@ async function run() {
             verifyHR,
             async (req, res) => {
                 const { companyName } = req.params;
+                const { page, limit } = req.query;
+
                 const query = {
                     companyName: {
                         $regex: new RegExp(`^${companyName}$`, "i"),
                     },
                 };
                 try {
-                    const assets = await assetsColl.find(query).toArray();
-                    res.status(200).send(assets);
+                    const assets = await assetsColl
+                        .find(query)
+                        .skip(10 * Number(page))
+                        .limit(Number(limit))
+                        .toArray();
+                    const assetsCount = await assetsColl.countDocuments(query);
+                    res.status(200).send({ assets, assetsCount });
                 } catch (error) {
                     console.error(error);
                     res.status(500).send({ message: "Failed to fetch assets" });
@@ -374,13 +388,7 @@ async function run() {
 
         app.get("/requests", verifyFirebaseToken, async (req, res) => {
             const { email } = req.user;
-            const { companyName } = req.query;
-
-            if (!companyName) {
-                return res
-                    .status(400)
-                    .send({ message: "companyName is required" });
-            }
+            const { companyName, page, limit } = req.query;
 
             try {
                 const query = {
@@ -388,8 +396,15 @@ async function run() {
                     companyName,
                 };
 
-                const requests = await reqColl.find(query).toArray();
-                res.status(200).send(requests);
+                const requests = await reqColl
+                    .find(query)
+                    .skip(Number(limit) * Number(page))
+                    .limit(Number(limit))
+                    .toArray();
+
+                const reqCount = await reqColl.countDocuments(query);
+
+                res.status(200).send({ requests, reqCount });
             } catch (error) {
                 console.error(error);
                 res.status(500).send({ message: "Server error" });
@@ -460,7 +475,7 @@ async function run() {
         // get all employees also AGGREGATE used for first time
         app.get("/emlist", verifyFirebaseToken, verifyHR, async (req, res) => {
             try {
-                const { email, companyName } = req.query;
+                const { email, companyName, page, limit } = req.query;
 
                 const employees = await reqColl
                     .aggregate([
@@ -507,9 +522,16 @@ async function run() {
                             },
                         },
                     ])
+                    .skip(Number(limit) * Number(page))
+                    .limit(Number(limit))
                     .toArray();
 
-                res.status(200).send(employees);
+                const emCount = await reqColl.countDocuments({
+                    companyName,
+                    requestStatus: "approved",
+                });
+
+                res.status(200).send({ employees, emCount });
             } catch (error) {
                 console.error(error);
                 res.status(500).send({ message: "Failed to fetch employees" });
