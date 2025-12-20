@@ -134,20 +134,37 @@ async function run() {
 
         // technically gets all the reqs as MyAssets
         app.get("/myassets", verifyFirebaseToken, async (req, res) => {
-            const { email, page, limit } = req.query;
+            const { email, page = 0, limit = 10 } = req.query;
 
             try {
-                const assets = await reqColl
-                    .find({ requesterEmail: email })
-                    .skip(10 * Number(page))
-                    .limit(Number(limit))
+                const reqAssets = await reqColl
+                    .find({ requesterEmail: email, requestStatus: "approved" })
                     .toArray();
 
-                const assetCount = await reqColl.countDocuments({
-                    requesterEmail: email,
-                });
+                const reqAssetIds = reqAssets.map((a) => a.assetId);
 
-                res.status(200).send({ assets, assetCount });
+                const assignedAssets = await assignedAssetColl
+                    .find({
+                        employeeEmail: email,
+                        assetId: { $nin: reqAssetIds },
+                    })
+                    .toArray();
+
+                const combinedAssets = [...reqAssets, ...assignedAssets];
+
+                const start = Number(page) * Number(limit);
+                const paginatedAssets = combinedAssets.slice(
+                    start,
+                    start + Number(limit)
+                );
+                // res.status(200).send({
+                //     reqAssets,
+                //     assignedAssets,
+                // });
+                res.status(200).send({
+                    assets: paginatedAssets,
+                    assetCount: combinedAssets.length,
+                });
             } catch (error) {
                 console.error(error);
                 res.status(500).send({ message: "Failed to fetch assets" });
@@ -262,6 +279,8 @@ async function run() {
         });
 
         // --------------- HR ---------------------
+
+        // add asset
         app.post(
             "/addasset",
             verifyFirebaseToken,
@@ -545,7 +564,7 @@ async function run() {
             verifyHR,
             async (req, res) => {
                 try {
-                    const { employeeEmail, companyName } = req.query;
+                    const { email, employeeEmail, companyName } = req.query;
 
                     const assignedAssets = await assignedAssetColl
                         .find({ employeeEmail, companyName })
@@ -570,6 +589,11 @@ async function run() {
                         employeeEmail,
                         companyName,
                     });
+
+                    await usersColl.updateOne(
+                        { email },
+                        { $inc: { currentEmployees: -1 } }
+                    );
 
                     if (affResult.deletedCount === 0) {
                         return res
@@ -604,8 +628,10 @@ async function run() {
                 const asset = await assetsColl.findOne({
                     _id: new ObjectId(assetId),
                 });
+
                 if (!asset)
                     return res.status(404).send({ message: "Asset not found" });
+
                 if (asset.availableQuantity <= 0)
                     return res
                         .status(400)
@@ -659,10 +685,77 @@ async function run() {
                     message: "Asset assigned successfully",
                 });
             } catch (error) {
-                console.error("Assign asset error:", error);
+                console.log("Assign asset error:", error);
                 res.status(500).send({ message: "Server error" });
             }
         });
+
+        // getting assignable assets
+        app.get(
+            "/assignable",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                try {
+                    const { email, emailem } = req.query;
+
+                    const hr = await usersColl.findOne(
+                        { email },
+                        { projection: { email: 1, companyName: 1, _id: 0 } }
+                    );
+
+                    const assignable = await assetsColl
+                        .aggregate([
+                            {
+                                $match: {
+                                    hrEmail: email,
+                                    companyName: hr.companyName,
+                                },
+                            },
+                            {
+                                $lookup: {
+                                    from: "assignedAssets",
+                                    let: { assetId: "$_id", empEmail: emailem },
+                                    pipeline: [
+                                        {
+                                            $match: {
+                                                $expr: {
+                                                    $and: [
+                                                        {
+                                                            $eq: [
+                                                                "$assetId",
+                                                                {
+                                                                    $toString:
+                                                                        "$$assetId",
+                                                                },
+                                                            ],
+                                                        },
+                                                        {
+                                                            $eq: [
+                                                                "$employeeEmail",
+                                                                "$$empEmail",
+                                                            ],
+                                                        },
+                                                    ],
+                                                },
+                                            },
+                                        },
+                                    ],
+                                    as: "empAssignment",
+                                },
+                            },
+                            { $match: { empAssignment: { $eq: [] } } },
+                            { $match: { availableQuantity: { $gt: 0 } } },
+                        ])
+                        .toArray();
+
+                    res.status(200).json(assignable);
+                } catch (err) {
+                    console.error("Error fetching assignable assets:", err);
+                    res.status(500).json({ error: "Internal server error" });
+                }
+            }
+        );
 
         app.post("/payment", verifyFirebaseToken, async (req, res) => {
             const payment = req.body;
