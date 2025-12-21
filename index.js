@@ -963,6 +963,57 @@ async function run() {
                 });
             }
         });
+
+        app.get("/chartdata", async (req, res) => {
+            try {
+                const { email } = req.query;
+
+                const totalCount = await assetsColl.countDocuments({
+                    hrEmail: email,
+                });
+
+                const returnableCount = await assetsColl.countDocuments({
+                    hrEmail: email,
+                    productType: "returnable",
+                });
+
+                // unique ids of all assets
+                // appearance
+                // limit and sort
+
+                const resultArray = await reqColl
+                    .aggregate([
+                        { $match: { hrEmail: email } },
+                        {
+                            $group: {
+                                _id: "$assetId",
+                                assetName: { $first: "$assetName" },
+                                count: { $sum: 1 },
+                            },
+                        },
+                        {
+                            $project: {
+                                _id: 0,
+                                assetId: "$_id",
+                                assetName: 1,
+                                count: 1,
+                            },
+                        },
+                        { $sort: { count: -1 } },
+                        { $limit: 5 },
+                    ])
+                    .toArray();
+
+                res.status(200).send({
+                    totalCount,
+                    returnableCount,
+                    resultArray,
+                });
+            } catch (error) {
+                console.error(error);
+                res.status(500).send({ message: "Something went wrong" });
+            }
+        });
     } finally {
     }
 }
