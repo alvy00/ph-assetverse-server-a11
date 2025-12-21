@@ -4,6 +4,7 @@ const cors = require("cors");
 const app = express();
 require("dotenv").config();
 
+const stripe = require("stripe")(process.env.PAYMENT_GATEWAY);
 const port = process.env.PORT || 4000;
 
 // middlewares
@@ -44,6 +45,14 @@ async function run() {
         const assignedAssetColl = db.collection("assignedAssets");
         const packColl = db.collection("packages");
         const payColl = db.collection("payments");
+
+        // ------------ MISC -----------------
+        const generateSessionId = () => {
+            return (
+                "PAY-" +
+                Math.random().toString(36).substring(2, 8).toUpperCase()
+            );
+        };
 
         // ----------- MIDDLEWARES -----------
         const verifyFirebaseToken = async (req, res, next) => {
@@ -757,11 +766,161 @@ async function run() {
             }
         );
 
-        app.post("/payment", verifyFirebaseToken, async (req, res) => {
-            const payment = req.body;
-            const result = await payColl.insertOne(payment);
-            res.send(result);
-        });
+        app.post(
+            "/payment-checkout-session",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                try {
+                    const { name, price } = req.body;
+                    const { email } = req.query;
+
+                    if (!name || !price || !email) {
+                        return res
+                            .status(400)
+                            .send({ message: "Missing required fields" });
+                    }
+
+                    const session = await stripe.checkout.sessions.create({
+                        line_items: [
+                            {
+                                price_data: {
+                                    currency: "USD",
+                                    unit_amount: Number(price) * 100,
+                                    product_data: {
+                                        name: name.toUpperCase(),
+                                    },
+                                },
+                                quantity: 1,
+                            },
+                        ],
+                        customer_email: email,
+                        mode: "payment",
+                        metadata: {
+                            name: name,
+                            transactionId: generateSessionId(),
+                        },
+                        success_url: `${process.env.SITE_DOMAIN}/payment-success?session_id={CHECKOUT_SESSION_ID}`,
+                        cancel_url: `${process.env.SITE_DOMAIN}/payment-cancelled`,
+                    });
+
+                    res.status(200).send({ url: session.url });
+                } catch (error) {
+                    console.error("Error creating checkout session:", error);
+                    res.status(500).send({
+                        message: "Failed to create checkout session",
+                    });
+                }
+            }
+        );
+
+        app.patch(
+            "/payment-success",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                try {
+                    const { email } = req.query;
+                    const sessionId = req.query.session_id;
+
+                    if (!email || !sessionId) {
+                        return res
+                            .status(400)
+                            .send({ message: "Missing email or session_id" });
+                    }
+
+                    const session = await stripe.checkout.sessions.retrieve(
+                        sessionId
+                    );
+
+                    if (session.payment_status !== "paid") {
+                        return res
+                            .status(400)
+                            .send({ message: "Payment not completed" });
+                    }
+
+                    const pack = await packColl.findOne({
+                        name: session.metadata.name,
+                    });
+                    if (!pack) {
+                        return res
+                            .status(404)
+                            .send({ message: "Package not found" });
+                    }
+
+                    const exists = await payColl.findOne({
+                        transactionId: session.metadata.transactionId,
+                    });
+
+                    if (exists) {
+                        return res.send({
+                            success: true,
+                            message: "Already processed",
+                            payment: exists,
+                        });
+                    }
+
+                    const payment = {
+                        hrEmail: email,
+                        packageName: pack.name,
+                        employeeLimit: pack.employeeLimit,
+                        amount: pack.price,
+                        transactionId: session.metadata.transactionId,
+                        paymentDate: new Date(),
+                        status: "completed",
+                    };
+
+                    await payColl.insertOne(payment);
+
+                    await usersColl.updateOne(
+                        { email },
+                        {
+                            $set: {
+                                packageLimit: pack.employeeLimit,
+                                subscription: pack.name,
+                            },
+                        }
+                    );
+
+                    res.send({ success: true, payment });
+                } catch (error) {
+                    console.error("Error processing payment success:", error);
+                    res.status(500).send({
+                        message: "Failed to process payment",
+                    });
+                }
+            }
+        );
+
+        app.get(
+            "/payments",
+            verifyFirebaseToken,
+            verifyHR,
+            async (req, res) => {
+                const { email } = req.query;
+
+                if (!email) {
+                    return res
+                        .status(400)
+                        .json({ success: false, message: "Email is required" });
+                }
+
+                try {
+                    const payments = await payColl
+                        .find({ hrEmail: email })
+                        .toArray();
+
+                    res.status(200).json({ success: true, payments });
+                } catch (error) {
+                    console.error("Error fetching payments:", error);
+                    res.status(500).json({
+                        success: false,
+                        message: "Failed to fetch payments",
+                        error: error.message,
+                    });
+                }
+            }
+        );
 
         // --------------- COMMON -----------------------
         app.patch("/profileupdate", verifyFirebaseToken, async (req, res) => {
@@ -788,6 +947,20 @@ async function run() {
             } catch (error) {
                 console.error(error);
                 res.status(500).send({ message: "Failed to update profile" });
+            }
+        });
+
+        app.get("/packages", async (req, res) => {
+            try {
+                const packages = await packColl.find().toArray();
+
+                res.status(200).send(packages);
+            } catch (error) {
+                console.error("Error fetching packages:", error);
+
+                res.status(500).send({
+                    message: "Failed to fetch packages",
+                });
             }
         });
     } finally {
