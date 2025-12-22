@@ -9,8 +9,7 @@ It provides secure APIs for authentication, asset management, employee-company r
 
 ## 🔗 Live API URL
 
-> _Add your deployed backend URL here_  
-> Example: `https://ph-assetverse-client-a11.netlify.app/`
+`https://ph-assetverse-server-a11.onrender.com`
 
 ---
 
