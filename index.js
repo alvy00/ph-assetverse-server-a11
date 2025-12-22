@@ -136,10 +136,19 @@ async function run() {
             }
         });
 
-        app.get("/assets", verifyFirebaseToken, async (req, res) => {
+        // get all assets
+        app.get("/assets", async (req, res) => {
+            const { page, limit } = req.query;
             try {
-                const assets = await assetsColl.find().toArray();
-                res.status(200).send(assets);
+                const assets = await assetsColl
+                    .find()
+                    .skip(10 * Number(page))
+                    .limit(Number(limit))
+                    .toArray();
+
+                const assetCount = await assetsColl.countDocuments();
+
+                res.status(200).send({ assets, assetCount });
             } catch (error) {
                 console.error(error);
                 res.status(500).send({ message: "Failed to fetch assets" });
