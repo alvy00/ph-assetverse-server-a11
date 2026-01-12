@@ -155,6 +155,26 @@ async function run() {
             }
         });
 
+        // get asset by id
+        app.get("/asset/:id", async (req, res) => {
+            const { id } = req.params;
+
+            try {
+                const asset = await assetsColl.findOne({
+                    _id: new ObjectId(id),
+                });
+
+                if (!asset) {
+                    return res.status(404).send({ message: "Asset not found" });
+                }
+
+                res.status(200).send(asset);
+            } catch (error) {
+                console.error("Error fetching asset:", error);
+                res.status(500).send({ message: "Server error" });
+            }
+        });
+
         // technically gets all the reqs as MyAssets
         app.get("/myassets", verifyFirebaseToken, async (req, res) => {
             const { email, page = 0, limit = 10 } = req.query;
